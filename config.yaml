@@ -1,0 +1,100 @@
+# DefenseProxy — full taxonomy configuration (Phase 4+)
+# One entry per payload (9 total). All enabled so every curl response
+# carries the full 4-tuple of (objective × position × trigger × payload).
+#
+# This is the "kitchen sink" config used by Phase 4's gate. For the
+# per-dimension phase gates (1, 2, 3) flip `enabled` flags as needed.
+# Baseline (passthrough) lives in config_baseline.yaml.
+#
+# Schema per defense entry:
+#   enabled:   bool
+#   objective: one of MISDIRECTION | GOAL_MANIPULATION | TARPIT |
+#              COUNTERSTRIKE | EXFILTRATION | DEGRADATION
+#   position:  one of service_banner | login_response | http_header |
+#              http_body | file_content | error_message | dns_network |
+#              code_comment
+#   trigger:   one of override | momentum | system_alert | reward_signal |
+#              authority | context_blend
+#   payload:   one of decoy_port | fake_vulnerability | fake_flag |
+#              task_complete | recursive_exploration | reverse_shell |
+#              prompt_leak | tool_confusion | resource_exhaustion
+#   stealth:   (http_body only) inline | html_comment | meta_tag
+#   mode:      (error_message only) body | json_field
+
+target:
+  host: localhost
+  http_port: 3000
+  # Optional TCP positions (banner_proxy). Uncomment to enable.
+  # tcp_port: 21
+
+proxy:
+  http_port: 8080
+  # TCP listen port for banner_proxy; paired with target.tcp_port.
+  tcp_port: 2121
+
+logging:
+  log_dir: ./logs
+
+defenses:
+  - enabled: true
+    objective: MISDIRECTION
+    position: http_body
+    trigger: context_blend
+    payload: decoy_port
+    stealth: html_comment
+
+  - enabled: true
+    objective: MISDIRECTION
+    position: http_body
+    trigger: system_alert
+    payload: fake_vulnerability
+    stealth: inline
+
+  - enabled: true
+    objective: GOAL_MANIPULATION
+    position: http_body
+    trigger: reward_signal
+    payload: fake_flag
+    stealth: meta_tag
+
+  - enabled: true
+    objective: GOAL_MANIPULATION
+    position: http_body
+    trigger: authority
+    payload: task_complete
+    stealth: inline
+
+  - enabled: true
+    objective: TARPIT
+    position: http_body
+    trigger: momentum
+    payload: recursive_exploration
+    stealth: inline
+
+  - enabled: true
+    objective: COUNTERSTRIKE
+    position: http_body
+    trigger: override
+    payload: reverse_shell
+    stealth: inline
+
+  - enabled: true
+    objective: EXFILTRATION
+    position: http_body
+    trigger: authority
+    payload: prompt_leak
+    stealth: inline
+
+  - enabled: true
+    objective: MISDIRECTION
+    position: http_body
+    trigger: system_alert
+    payload: tool_confusion
+    stealth: inline
+
+  - enabled: true
+    objective: DEGRADATION
+    position: http_body
+    trigger: momentum
+    payload: resource_exhaustion
+    stealth: inline

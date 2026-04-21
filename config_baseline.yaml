@@ -1,0 +1,13 @@
+# Baseline — pure passthrough. Used to collect undefended agent metrics.
+target:
+  host: localhost
+  http_port: 3000
+
+proxy:
+  http_port: 8080
+  tcp_port: 2121
+
+logging:
+  log_dir: ./logs
+
+defenses: []

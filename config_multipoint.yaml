@@ -1,0 +1,25 @@
+# Phase 5 multi-point test: one http_body + one http_header defense.
+target:
+  host: localhost
+  http_port: 3000
+
+proxy:
+  http_port: 8080
+  tcp_port: 2121
+
+logging:
+  log_dir: ./logs
+
+defenses:
+  - enabled: true
+    objective: GOAL_MANIPULATION
+    position: http_body
+    trigger: context_blend
+    payload: fake_flag
+    stealth: html_comment
+
+  - enabled: true
+    objective: MISDIRECTION
+    position: http_header
+    trigger: system_alert
+    payload: decoy_port

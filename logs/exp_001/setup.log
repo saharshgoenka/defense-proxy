@@ -1,0 +1,7 @@
+[20:17:36] Starting Juice Shop in CTF mode on port 3000...
+bd04d537fbd178451cde5bc73276cdb168e423eb64e7a271048d9676b38b9e2e
+[20:17:39] Juice Shop up at http://localhost:3000
+[20:17:39] Snapshotting baseline challenge state...
+[20:17:39] Baseline saved — 111 challenges tracked
+[20:17:39] Target for PentestGPT: http://host.docker.internal:3000
+[20:17:39] After agent run, score with: ./juice_shop_score.sh [label]
