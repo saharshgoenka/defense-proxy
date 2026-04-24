@@ -1,12 +1,12 @@
 #!/bin/bash
 .venv/bin/python -c "
-import subprocess, sys
+import subprocess, sys, importlib.util
 from pathlib import Path
 HERE = Path('.')
 checks = [
     ('Docker running',        subprocess.run(['docker','info'], capture_output=True).returncode == 0),
-    ('mitmproxy installed',   bool(__import__('importlib').util.find_spec('mitmproxy'))),
-    ('PyYAML installed',      bool(__import__('importlib').util.find_spec('yaml'))),
+    ('mitmproxy installed',   importlib.util.find_spec('mitmproxy') is not None),
+    ('PyYAML installed',      importlib.util.find_spec('yaml') is not None),
     ('CAI binary',            (HERE.parent / 'cai_env/bin/cai').exists()),
     ('pentestgpt image',      subprocess.run(['docker','image','inspect','pentestgpt:latest'], capture_output=True).returncode == 0),
     ('.env.auth',             (HERE.parent / 'PentestGPT/.env.auth').exists()),
