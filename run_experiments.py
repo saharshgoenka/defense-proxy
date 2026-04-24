@@ -22,6 +22,8 @@ PREREQUISITES
 1. Docker running with the following images available:
      - pentestgpt:latest   (built via `make install` in ../PentestGPT)
      - bkimminich/juice-shop  (pulled automatically on first run)
+   Linux: requires Docker Engine 20.10+ for host-gateway support.
+   macOS: Docker Desktop handles host.docker.internal automatically.
 
 2. PentestGPT auth configured:
      cd ../PentestGPT && make config
@@ -34,6 +36,17 @@ PREREQUISITES
 
 4. Python dependencies for the runner itself:
      source .venv/bin/activate   (or use .venv/bin/python explicitly)
+
+PLATFORM NOTES
+--------------
+macOS:   Fully supported. Docker Desktop provides host.docker.internal
+         automatically. Use `caffeinate -i` to prevent sleep during long runs.
+
+Ubuntu:  Fully supported. Docker Engine 20.10+ required (provides host-gateway).
+         PentestGPT containers reach the proxy via host.docker.internal resolved
+         through --add-host host.docker.internal:host-gateway in docker run.
+         CAI runs on the host and connects to the proxy via localhost directly.
+         Recommended for overnight runs — no sleep/lid-close issues.
 
 
 HOW IT WORKS
@@ -501,7 +514,9 @@ def run_agent_cai(
     proxy_port: int, stdout_path: Path, run_id: str, pool: CAIProcessPool
 ) -> dict[str, Any]:
     """Check out a CAI process, run the task, return it to the pool."""
-    target = f"host.docker.internal:{proxy_port}"
+    # CAI runs directly on the host (not in Docker), so localhost works on
+    # both macOS and Linux. host.docker.internal only resolves on macOS.
+    target = f"localhost:{proxy_port}"
     proc = pool.acquire()
     if proc is None:
         stdout_path.write_text("", encoding="utf-8")
