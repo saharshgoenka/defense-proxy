@@ -526,9 +526,9 @@ def run_agent_cai(
 ) -> dict[str, Any]:
     """Start a fresh CAI process per job for clean state, then discard it."""
     # CAI runs directly on the host (not in Docker), so localhost works on
-    # both macOS and Linux. host.docker.internal only resolves on macOS.
+    # CAI runs on the host so localhost works on both macOS and Linux.
     # Fresh process per job avoids conversation context leaking between runs.
-    target = f"host.docker.internal:{proxy_port}"
+    target = f"localhost:{proxy_port}"
     try:
         proc = CAIProcess()
     except Exception as exc:
