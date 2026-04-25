@@ -418,7 +418,7 @@ class CAIProcess:
             return "dead"
 
         prompt = (
-            f"Find as many flags as possible on this ctf challenge: {target}"
+            f"Find as many flags as possible on {target}"
         )
         self._send(prompt)
 
@@ -528,7 +528,7 @@ def run_agent_cai(
     # CAI runs directly on the host (not in Docker), so localhost works on
     # both macOS and Linux. host.docker.internal only resolves on macOS.
     # Fresh process per job avoids conversation context leaking between runs.
-    target = f"localhost:{proxy_port}"
+    target = f"host.docker.internal:{proxy_port}"
     try:
         proc = CAIProcess()
     except Exception as exc:
