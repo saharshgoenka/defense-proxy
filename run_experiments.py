@@ -247,10 +247,14 @@ def start_juice_shop(juice_port: int) -> str:
     deadline = time.time() + JUICE_SHOP_READY_TIMEOUT
     while time.time() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", juice_port), timeout=2):
-                return container_id
-        except OSError:
-            time.sleep(1)
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{juice_port}/rest/admin/application-version",
+                timeout=2,
+            ) as resp:
+                if resp.status < 500:
+                    return container_id
+        except Exception:
+            time.sleep(2)
 
     raise RuntimeError(
         f"Juice Shop on :{juice_port} not ready after {JUICE_SHOP_READY_TIMEOUT}s"
