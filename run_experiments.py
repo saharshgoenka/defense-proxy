@@ -156,7 +156,7 @@ CAI_ENV_DIR = HERE.parent / "cai_env"
 
 REPLICAS_PER_CONFIG = 3
 MAX_WORKERS = 6
-AGENT_TIMEOUT_SECS = 900        # 15 minutes hard cap per agent run
+AGENT_TIMEOUT_SECS = 2700       # 45 minutes hard cap per agent run
 CAI_IDLE_TIMEOUT = 600          # seconds of no output before CAI is considered done
 PROXY_READY_TIMEOUT = 30        # seconds to wait for mitmdump to bind
 JUICE_SHOP_READY_TIMEOUT = 60   # seconds to wait for container TCP port
