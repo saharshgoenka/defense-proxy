@@ -773,14 +773,86 @@ class ResultsStore:
 # SECTION 7: Main entrypoint — discover configs, work queue, ThreadPoolExecutor
 # =============================================================================
 
+def _run_both(args: argparse.Namespace) -> None:
+    """
+    Spawn two child processes — one pentestgpt, one cai — with non-overlapping
+    port ranges. Streams both logs to stdout prefixed with [pentestgpt] / [cai].
+    """
+    import multiprocessing
+
+    results_base = args.results_dir
+    log_dir = HERE / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    pgpt_log = log_dir / "pentestgpt.log"
+    cai_log  = log_dir / "cai.log"
+
+    # CAI port range starts 100 above pentestgpt to avoid collisions
+    port_offset = 100
+
+    base_argv = [
+        str(args.config_dir),
+        "--replicas", str(args.replicas),
+        "--workers",  str(args.workers),
+        "--proxy-port-base", str(args.proxy_port_base),
+        "--juice-port-base", str(args.juice_port_base),
+    ]
+
+    cai_argv = [
+        str(args.config_dir),
+        "--replicas", str(args.replicas),
+        "--workers",  str(args.workers),
+        "--proxy-port-base", str(args.proxy_port_base + port_offset),
+        "--juice-port-base", str(args.juice_port_base + port_offset),
+    ]
+
+    def run_agent_subprocess(agent: str, extra_argv: list[str], log_path: Path,
+                             results_dir: Path) -> None:
+        full_argv = extra_argv + ["--agent", agent, "--results-dir", str(results_dir)]
+        with open(log_path, "w", encoding="utf-8") as fh:
+            proc = subprocess.Popen(
+                [sys.executable, __file__] + full_argv,
+                stdout=fh, stderr=fh,
+                env={**os.environ, "OBJC_DISABLE_INITIALIZE_FORK_SAFETY": "YES"},
+            )
+            proc.wait()
+
+    pgpt_proc = multiprocessing.Process(
+        target=run_agent_subprocess,
+        args=("pentestgpt", base_argv, pgpt_log, results_base / "pentestgpt"),
+        daemon=True,
+    )
+    cai_proc = multiprocessing.Process(
+        target=run_agent_subprocess,
+        args=("cai", cai_argv, cai_log, results_base / "cai"),
+        daemon=True,
+    )
+
+    print(f"[both] starting pentestgpt → {pgpt_log}")
+    print(f"[both] starting cai        → {cai_log}")
+    print(f"[both] results → {results_base}/pentestgpt  and  {results_base}/cai")
+
+    pgpt_proc.start()
+    cai_proc.start()
+
+    try:
+        pgpt_proc.join()
+        cai_proc.join()
+    except KeyboardInterrupt:
+        pgpt_proc.terminate()
+        cai_proc.terminate()
+
+    print(f"\n[both] done — pentestgpt exit={pgpt_proc.exitcode}  cai exit={cai_proc.exitcode}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Run DefenseProxy experiments in parallel across a config directory."
     )
     ap.add_argument("config_dir", type=Path,
                     help="Directory containing *.yaml config files")
-    ap.add_argument("--agent", choices=["pentestgpt", "cai"], default="pentestgpt",
-                    help="Agent to run against each proxy (default: pentestgpt)")
+    ap.add_argument("--agent", choices=["pentestgpt", "cai", "both"], default="pentestgpt",
+                    help="Agent to run (default: pentestgpt). 'both' runs pentestgpt and cai in parallel.")
     ap.add_argument("--workers", type=int, default=MAX_WORKERS,
                     help=f"Max concurrent workers (default {MAX_WORKERS})")
     ap.add_argument("--replicas", type=int, default=REPLICAS_PER_CONFIG,
@@ -792,6 +864,11 @@ def main() -> None:
     ap.add_argument("--juice-port-base", type=int, default=JUICE_PORT_BASE,
                     help=f"Starting Juice Shop port (default {JUICE_PORT_BASE})")
     args = ap.parse_args()
+
+    # --agent both: re-invoke self as two parallel subprocesses with non-overlapping ports
+    if args.agent == "both":
+        _run_both(args)
+        return
 
     config_files = sorted(args.config_dir.glob("*.yaml"))
     if not config_files:
