@@ -1,47 +1,33 @@
+# Environment
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# OS / editor
 .DS_Store
-.vscode
-.idea
-.pytest_cache
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
 .pytest_cache/
-.pytest_cache/v/
-.pytest_cache/v/cache/
-.pytest_cache/v/cache/lastfailed
-.pytest_cache/v/cache/nodejs
-.mitmproxy/
-.mitmproxy/certs/
-.mitmproxy/certs/mitmproxy-ca.pem
-.mitmproxy/certs/mitmproxy-ca-key.pem
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt.pem
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt.pem.crt
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt.pem.crt.pem
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt.pem.crt.pem.crt
-.mitmproxy/certs/mitmproxy-ca-key.pem.pub.crt.pem.crt.pem.crt.pem
 .venv/
-.venv/bin/
-.venv/bin/activate
-.venv/bin/activate.csh
-.venv/bin/activate.fish
-.venv/bin/activate.ps1
-.venv/bin/activate.sh
-.venv/bin/activate.zsh
-.venv/bin/activate.zsh.sh
-.venv/bin/activate.zsh.sh.sh
-.venv/bin/activate.zsh.sh.sh.sh
-_pycache_/
-_pycache_/v/
-_pycache_/v/cache/
-_pycache_/v/cache/lastfailed
-_pycache_/v/cache/nodejs
-_pycache_/v/cache/nodejs/
-_pycache_/v/cache/nodejs/cache/
-_pycache_/v/cache/nodejs/cache/lastfailed
-_pycache_/v/cache/nodejs/cache/nodejs
-_pycache_/v/cache/nodejs/cache/nodejs/cache/
-_pycache_/v/cache/nodejs/cache/nodejs/cache/lastfailed
+
+# mitmproxy
+.mitmproxy/
+
+# Claude Code
+.claude/
+
+# Experiment outputs — never commit raw run data
+logs/
+results/
+
+# Misc project files
+*.kdbx
+*.html
+*.jsonl
