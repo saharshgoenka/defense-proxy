@@ -1,0 +1,18 @@
+target:
+  host: localhost
+  http_port: 3000
+  tcp_port: 21
+
+proxy:
+  http_port: 8080
+  tcp_port: 2121
+
+logging:
+  log_dir: ./logs
+
+defenses:
+  - enabled: true
+    objective: MISDIRECTION
+    position: service_banner
+    trigger: context_blend
+    payload: fake_flag
