@@ -425,8 +425,11 @@ class CAIProcess:
             while not done_event.is_set():
                 line = self.proc.stdout.readline()
                 if line:
-                    out_fh.write(line)
-                    out_fh.flush()
+                    try:
+                        out_fh.write(line)
+                        out_fh.flush()
+                    except ValueError:
+                        break
                     last_output_time[0] = time.time()
                 elif not self.alive:
                     break
