@@ -776,73 +776,49 @@ class ResultsStore:
 def _run_both(args: argparse.Namespace) -> None:
     """
     Spawn two child processes — one pentestgpt, one cai — with non-overlapping
-    port ranges. Streams both logs to stdout prefixed with [pentestgpt] / [cai].
+    port ranges. Each writes to its own log file under logs/.
     """
-    import multiprocessing
-
-    results_base = args.results_dir
     log_dir = HERE / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-
     pgpt_log = log_dir / "pentestgpt.log"
     cai_log  = log_dir / "cai.log"
 
-    # CAI port range starts 100 above pentestgpt to avoid collisions
-    port_offset = 100
+    port_offset = 100  # CAI ports start 100 above pentestgpt
+    env = {**os.environ, "OBJC_DISABLE_INITIALIZE_FORK_SAFETY": "YES"}
 
-    base_argv = [
-        str(args.config_dir),
-        "--replicas", str(args.replicas),
-        "--workers",  str(args.workers),
-        "--proxy-port-base", str(args.proxy_port_base),
-        "--juice-port-base", str(args.juice_port_base),
-    ]
+    base = [sys.executable, __file__, str(args.config_dir),
+            "--replicas", str(args.replicas), "--workers", str(args.workers)]
 
-    cai_argv = [
-        str(args.config_dir),
-        "--replicas", str(args.replicas),
-        "--workers",  str(args.workers),
-        "--proxy-port-base", str(args.proxy_port_base + port_offset),
-        "--juice-port-base", str(args.juice_port_base + port_offset),
-    ]
+    with open(pgpt_log, "w", encoding="utf-8") as pf, \
+         open(cai_log,  "w", encoding="utf-8") as cf:
 
-    def run_agent_subprocess(agent: str, extra_argv: list[str], log_path: Path,
-                             results_dir: Path) -> None:
-        full_argv = extra_argv + ["--agent", agent, "--results-dir", str(results_dir)]
-        with open(log_path, "w", encoding="utf-8") as fh:
-            proc = subprocess.Popen(
-                [sys.executable, __file__] + full_argv,
-                stdout=fh, stderr=fh,
-                env={**os.environ, "OBJC_DISABLE_INITIALIZE_FORK_SAFETY": "YES"},
-            )
-            proc.wait()
+        pgpt_proc = subprocess.Popen(
+            base + ["--agent", "pentestgpt",
+                    "--proxy-port-base", str(args.proxy_port_base),
+                    "--juice-port-base", str(args.juice_port_base),
+                    "--results-dir", str(args.results_dir / "pentestgpt")],
+            stdout=pf, stderr=pf, env=env,
+        )
+        cai_proc = subprocess.Popen(
+            base + ["--agent", "cai",
+                    "--proxy-port-base", str(args.proxy_port_base + port_offset),
+                    "--juice-port-base", str(args.juice_port_base + port_offset),
+                    "--results-dir", str(args.results_dir / "cai")],
+            stdout=cf, stderr=cf, env=env,
+        )
 
-    pgpt_proc = multiprocessing.Process(
-        target=run_agent_subprocess,
-        args=("pentestgpt", base_argv, pgpt_log, results_base / "pentestgpt"),
-        daemon=True,
-    )
-    cai_proc = multiprocessing.Process(
-        target=run_agent_subprocess,
-        args=("cai", cai_argv, cai_log, results_base / "cai"),
-        daemon=True,
-    )
+        print(f"[both] pentestgpt PID {pgpt_proc.pid} → {pgpt_log}")
+        print(f"[both] cai        PID {cai_proc.pid}  → {cai_log}")
+        print(f"[both] results    → {args.results_dir}/pentestgpt  and  {args.results_dir}/cai")
 
-    print(f"[both] starting pentestgpt → {pgpt_log}")
-    print(f"[both] starting cai        → {cai_log}")
-    print(f"[both] results → {results_base}/pentestgpt  and  {results_base}/cai")
+        try:
+            pgpt_proc.wait()
+            cai_proc.wait()
+        except KeyboardInterrupt:
+            pgpt_proc.terminate()
+            cai_proc.terminate()
 
-    pgpt_proc.start()
-    cai_proc.start()
-
-    try:
-        pgpt_proc.join()
-        cai_proc.join()
-    except KeyboardInterrupt:
-        pgpt_proc.terminate()
-        cai_proc.terminate()
-
-    print(f"\n[both] done — pentestgpt exit={pgpt_proc.exitcode}  cai exit={cai_proc.exitcode}")
+    print(f"\n[both] done — pentestgpt exit={pgpt_proc.returncode}  cai exit={cai_proc.returncode}")
 
 
 def main() -> None:
