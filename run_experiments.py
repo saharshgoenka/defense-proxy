@@ -148,6 +148,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from tqdm import tqdm
 
 HERE = Path(__file__).resolve().parent
 PENTESTGPT_DIR = HERE.parent / "PentestGPT"
@@ -819,7 +820,15 @@ def main() -> None:
                 executor.submit(worker, cfg, idx, port_pool, store, agent_cfg): (cfg, idx)
                 for cfg, idx in jobs
             }
-            for future in as_completed(futures):
+            bar = tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc=f"{args.agent}",
+                unit="run",
+                dynamic_ncols=True,
+                file=sys.stderr,
+            )
+            for future in bar:
                 cfg, idx = futures[future]
                 try:
                     res = future.result()
@@ -829,11 +838,10 @@ def main() -> None:
                     line = f"  [{tag}] {cfg.name}  replica {idx}"
                     if res.get("error"):
                         line += f"  —  {res['error']}"
-                    print(line, flush=True)
+                    bar.write(line)
                 except Exception as exc:
                     outcomes["failed"] += 1
-                    print(f"  [ERR] {cfg.name}  replica {idx}  —  unexpected: {exc}",
-                          flush=True)
+                    bar.write(f"  [ERR] {cfg.name}  replica {idx}  —  unexpected: {exc}")
     finally:
         if cai_pool is not None:
             cai_pool.shutdown()
