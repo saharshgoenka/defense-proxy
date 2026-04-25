@@ -524,19 +524,21 @@ class CAIProcessPool:
 def run_agent_cai(
     proxy_port: int, stdout_path: Path, run_id: str, pool: CAIProcessPool
 ) -> dict[str, Any]:
-    """Check out a CAI process, run the task, return it to the pool."""
+    """Start a fresh CAI process per job for clean state, then discard it."""
     # CAI runs directly on the host (not in Docker), so localhost works on
     # both macOS and Linux. host.docker.internal only resolves on macOS.
+    # Fresh process per job avoids conversation context leaking between runs.
     target = f"localhost:{proxy_port}"
-    proc = pool.acquire()
-    if proc is None:
+    try:
+        proc = CAIProcess()
+    except Exception as exc:
         stdout_path.write_text("", encoding="utf-8")
         return {"outcome": "failed", "stdout_path": str(stdout_path),
-                "error": "CAI pool exhausted — no process available"}
+                "error": f"CAI process failed to start: {exc}"}
     try:
         outcome = proc.run_task(target, stdout_path)
     finally:
-        pool.release(proc)
+        proc.kill()
     return {"outcome": outcome, "stdout_path": str(stdout_path)}
 
 
