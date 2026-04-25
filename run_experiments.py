@@ -157,7 +157,7 @@ CAI_ENV_DIR = HERE.parent / "cai_env"
 REPLICAS_PER_CONFIG = 3
 MAX_WORKERS = 6
 AGENT_TIMEOUT_SECS = 900        # 15 minutes hard cap per agent run
-CAI_IDLE_TIMEOUT = 180          # seconds of no output before CAI is considered done
+CAI_IDLE_TIMEOUT = 600          # seconds of no output before CAI is considered done
 PROXY_READY_TIMEOUT = 30        # seconds to wait for mitmdump to bind
 JUICE_SHOP_READY_TIMEOUT = 60   # seconds to wait for container TCP port
 JUICE_SHOP_IMAGE = "bkimminich/juice-shop"
@@ -354,7 +354,7 @@ def run_agent(proxy_port: int, stdout_path: Path, run_id: str) -> dict[str, Any]
         "bash", "-c",
         f'cp /home/pentester/.claude/backups/.claude.json.backup.* '
         f'/home/pentester/.claude.json 2>/dev/null || true; '
-        f'pentestgpt --target {target} --non-interactive',
+        f'pentestgpt --target {target}',
     ]
 
     with open(stdout_path, "w", encoding="utf-8") as out_fh:
