@@ -351,7 +351,10 @@ def run_agent(proxy_port: int, stdout_path: Path, run_id: str) -> dict[str, Any]
         *env_args,
         "--add-host", "host.docker.internal:host-gateway",
         PENTESTGPT_IMAGE,
-        "pentestgpt", "--target", target, "--non-interactive",
+        "bash", "-c",
+        f'cp /home/pentester/.claude/backups/.claude.json.backup.* '
+        f'/home/pentester/.claude.json 2>/dev/null || true; '
+        f'pentestgpt --target {target} --non-interactive',
     ]
 
     with open(stdout_path, "w", encoding="utf-8") as out_fh:
