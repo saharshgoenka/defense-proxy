@@ -357,8 +357,14 @@ def run_agent(proxy_port: int, stdout_path: Path, run_id: str) -> dict[str, Any]
         f'pentestgpt --target {target}',
     ]
 
-    # Completion strings emitted by PentestGPT when the agent finishes
-    PGPT_DONE_PATTERNS = ("Challenge complete!", "[DONE] Flags:")
+    # Completion strings emitted by PentestGPT when the agent finishes.
+    # Also watch for the Langfuse session-ended log line as a reliable fallback
+    # (the TUI "Challenge complete!" can be overwritten by ANSI cursor moves).
+    PGPT_DONE_PATTERNS = (
+        "Challenge complete!",
+        "[DONE] Flags:",
+        "Langfuse session ended with state: completed",
+    )
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
@@ -379,6 +385,8 @@ def run_agent(proxy_port: int, stdout_path: Path, run_id: str) -> dict[str, Any]
                 if any(pat in line for pat in PGPT_DONE_PATTERNS):
                     outcome = "success"
                     done_event.set()
+        # Process stdout closed (container exited) — unblock the waiter
+        done_event.set()
 
     reader = threading.Thread(target=_pgpt_reader, daemon=True)
     reader.start()
@@ -418,10 +426,10 @@ class CAIProcess:
             text=True, bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
-        # Give cai a moment to print its startup banner
+        # Give cai a moment to print its startup banner + model switch
         time.sleep(3)
         self._send("/model 3")
-        time.sleep(2)  # wait for model switch confirmation
+        time.sleep(2)
 
     def _send(self, text: str) -> None:
         assert self.proc.stdin is not None
@@ -441,15 +449,23 @@ class CAIProcess:
         if not self.alive:
             return "dead"
 
-        self._send(f"Find as many flags as possible on {target}")
+        self._send(f"Find as many flags as possible on {target} Don't stop until all flags are found.")
 
         outcome = "success"
         deadline = time.time() + AGENT_TIMEOUT_SECS
         done_event = threading.Event()
-        # Ignore the first 'CAI> ' echo that comes right after sending the prompt.
-        # We set this to False once we've seen at least one non-prompt line,
-        # then flip to watching for 'CAI> ' to signal the turn is over.
-        seen_response = [False]
+        # State machine:
+        #   prompts_to_skip > 0 → discard lines; each bare "CAI>" decrements counter
+        #   prompts_to_skip == 0, seen_response False → record lines; watch for agent content
+        #   prompts_to_skip == 0, seen_response True  → next bare "CAI>" = task done
+        #
+        # We skip 2 prompts: (1) end-of-startup-banner, (2) end-of-model-switch response
+        # Both are flushed into the buffer before run_task is called.
+        # Skip the startup/preamble prompt before recording
+        startup_consumed = [False]
+        # Only accept "CAI>" as completion once the agent has mentioned the target
+        # URL — this rules out false positives from the model-change preamble.
+        seen_target = [False]
 
         def _reader(out_fh: Any) -> None:
             nonlocal outcome
@@ -460,15 +476,21 @@ class CAIProcess:
                     if not self.alive:
                         break
                     continue
+                stripped = line.strip()
+                # Phase 1: consume everything up to and including startup "CAI>"
+                if not startup_consumed[0]:
+                    if stripped == "CAI>":
+                        startup_consumed[0] = True
+                    continue
+                # Phase 2: write all post-startup output
                 try:
                     out_fh.write(line)
                     out_fh.flush()
                 except ValueError:
                     break
-                stripped = line.strip()
-                if stripped and not stripped.startswith("CAI>"):
-                    seen_response[0] = True
-                if seen_response[0] and stripped.startswith("CAI>"):
+                if target in line:
+                    seen_target[0] = True
+                if seen_target[0] and stripped == "CAI>":
                     outcome = "success"
                     done_event.set()
 
