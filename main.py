@@ -330,6 +330,20 @@ def main() -> int:
             procs.append(launch_http_proxy(args.config, args.run_id, cfg))
         _install_signal_handlers(procs)
 
+        if effective_mode in ("http", "all"):
+            proxy_port = int(proxy["http_port"])
+            deadline = time.time() + 30
+            ready = False
+            while time.time() < deadline:
+                try:
+                    with socket.create_connection(("127.0.0.1", proxy_port), timeout=1):
+                        ready = True
+                        break
+                except OSError:
+                    time.sleep(1)
+            if not ready:
+                raise RuntimeError(f"proxy on :{proxy_port} did not bind within 30s")
+
         print(f"\n[main] proxy ready — point your agent at: {proxy_url}")
         print("[main] press Enter when the agent is done to stop the proxy and score ...\n")
 
