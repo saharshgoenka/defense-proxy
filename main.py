@@ -47,7 +47,12 @@ JUICE_SHOP_READY_TIMEOUT = 90
 def start_juice_shop(juice_port: int) -> str:
     """Start a fresh Juice Shop container and block until it's ready. Returns container id."""
     result = subprocess.run(
-        ["docker", "run", "-d", "--rm", "-p", f"{juice_port}:3000", JUICE_SHOP_IMAGE],
+        [
+            "docker", "run", "-d", "--rm",
+            "--add-host", "host.docker.internal:host-gateway",
+            "-p", f"{juice_port}:3000",
+            JUICE_SHOP_IMAGE,
+        ],
         capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
