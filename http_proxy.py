@@ -168,7 +168,24 @@ class DefenseProxyAddon:
             body = flow.response.raw_content.decode("utf-8", errors="replace") \
                 if flow.response.raw_content else ""
 
-        flow.response.set_text(body + fragment)
+        if not body:
+            return False
+
+        # Try to find a logical insertion point in HTML. Prioritize </footer>,
+        # then </body>, then </html>. Fall back to appending.
+        lower_body = body.lower()
+        insertion_point = -1
+        for tag in ["</footer>", "</body>", "</html>"]:
+            idx = lower_body.rfind(tag)
+            if idx != -1:
+                insertion_point = idx
+                break
+
+        if insertion_point != -1:
+            flow.response.set_text(body[:insertion_point] + fragment + body[insertion_point:])
+        else:
+            flow.response.set_text(body + fragment)
+
         # Let mitmproxy recompute Content-Length — per project rules, remove it.
         flow.response.headers.pop("Content-Length", None)
         # Strip conflicting content encodings since set_text re-serialises plain text.
@@ -237,7 +254,10 @@ class DefenseProxyAddon:
 
     def _apply_code_comment(self, flow: http.HTTPFlow, entry: dict[str, Any]) -> bool:
         ctype = flow.response.headers.get("Content-Type", "")
-        if "javascript" not in ctype and "ecmascript" not in ctype:
+        is_js = "javascript" in ctype or "ecmascript" in ctype
+        is_html = "html" in ctype
+
+        if not (is_js or is_html):
             return False
 
         text = get_injection(entry.get("objective"), entry.get("trigger"),
@@ -247,7 +267,24 @@ class DefenseProxyAddon:
 
         single_line = re.sub(r"[\r\n]+", " ", text)
         body = flow.response.get_text() or ""
-        flow.response.set_text(f"// {single_line}\n" + body)
+        
+        if is_js:
+            flow.response.set_text(f"// {single_line}\n" + body)
+        elif is_html:
+            # Inject right after <body> or at the top
+            fragment = f'\n<script>// {single_line}</script>\n'
+            lower_body = body.lower()
+            idx = lower_body.find("<body")
+            if idx != -1:
+                # Find the end of the opening body tag
+                end_idx = body.find(">", idx)
+                if end_idx != -1:
+                    flow.response.set_text(body[:end_idx + 1] + fragment + body[end_idx + 1:])
+                else:
+                    flow.response.set_text(fragment + body)
+            else:
+                flow.response.set_text(fragment + body)
+
         flow.response.headers.pop("Content-Length", None)
         flow.response.headers.pop("Content-Encoding", None)
         self._log_injection(flow, entry, text,
