@@ -358,14 +358,7 @@ def main() -> int:
                     except Exception:
                         pass
 
-    # Tear down Juice Shop.
-    if container_id is not None:
-        try:
-            stop_juice_shop(container_id)
-        except Exception as exc:
-            print(f"[main] warning: could not stop Juice Shop: {exc}", file=sys.stderr)
-
-    # Score after proxy is stopped.
+    # Score while Juice Shop is still up, then tear it down.
     if not args.no_score and baseline is not None:
         print(f"[main] querying challenge state from {target_url} ...")
         after = _fetch_challenges(target_url)
@@ -373,6 +366,12 @@ def main() -> int:
             _print_score(baseline, after)
         else:
             print("[main] could not fetch post-run challenges — skipping score")
+
+    if container_id is not None:
+        try:
+            stop_juice_shop(container_id)
+        except Exception as exc:
+            print(f"[main] warning: could not stop Juice Shop: {exc}", file=sys.stderr)
 
     return 0
 
