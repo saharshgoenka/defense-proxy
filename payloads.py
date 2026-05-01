@@ -34,6 +34,8 @@ class Position(str, Enum):
     ERROR_MESSAGE = "error_message"     # P6
     DNS_NETWORK = "dns_network"         # P7
     CODE_COMMENT = "code_comment"       # P8
+    ROBOTS_TXT = "robots_txt"           # P9
+    COOKIE = "cookie"                   # P10
 
 
 # Phase-3 trigger prefixes. `context_blend` is the null-prefix baseline —

@@ -12,11 +12,13 @@ Configuration is read from the environment:
     DEFENSEPROXY_RUN_ID    run identifier (used for log dir)
 
 Supports these positions:
-    P3 http_header    — append payload to X-Defense-Info response header
-    P4 http_body      — append payload to HTML body (modes: inline |
-                         html_comment | meta_tag)
-    P6 error_message  — inject into 4xx/5xx responses (body or JSON field)
-    P8 code_comment   — inject as `// <payload>` into JS responses
+    P3  http_header    — append payload to X-Defense-Info response header
+    P4  http_body      — append payload to HTML body (modes: inline |
+                          html_comment | meta_tag)
+    P6  error_message  — inject into 4xx/5xx responses (body or JSON field)
+    P8  code_comment   — inject as `// <payload>` into JS responses
+    P9  robots_txt     — append payload as a comment in /robots.txt
+    P10 cookie         — set payload as a cookie value via Set-Cookie header
 
 All other positions are handled by banner_proxy.py / file_injector.py.
 """
@@ -52,6 +54,8 @@ _HTTP_POSITIONS = {
     Position.HTTP_BODY.value,
     Position.ERROR_MESSAGE.value,
     Position.CODE_COMMENT.value,
+    Position.ROBOTS_TXT.value,
+    Position.COOKIE.value,
 }
 
 
@@ -110,6 +114,12 @@ class DefenseProxyAddon:
                     any_injection = True
             elif pos == Position.CODE_COMMENT.value:
                 if self._apply_code_comment(flow, entry):
+                    any_injection = True
+            elif pos == Position.ROBOTS_TXT.value:
+                if self._apply_robots_txt(flow, entry):
+                    any_injection = True
+            elif pos == Position.COOKIE.value:
+                if self._apply_cookie(flow, entry):
                     any_injection = True
 
         if not any_injection:
@@ -289,6 +299,39 @@ class DefenseProxyAddon:
         flow.response.headers.pop("Content-Encoding", None)
         self._log_injection(flow, entry, text,
                             position=Position.CODE_COMMENT.value)
+        return True
+
+    # ---- position P9: robots_txt --------------------------------------
+
+    def _apply_robots_txt(self, flow: http.HTTPFlow, entry: dict[str, Any]) -> bool:
+        if flow.request.path.split("?")[0] != "/robots.txt":
+            return False
+
+        text = get_injection(entry.get("objective"), entry.get("trigger"),
+                             entry.get("payload"))
+        if not text:
+            return False
+
+        body = flow.response.get_text() or ""
+        flow.response.set_text(body + "\n# " + text + "\n")
+        flow.response.headers.pop("Content-Length", None)
+        flow.response.headers.pop("Content-Encoding", None)
+        self._log_injection(flow, entry, text, position=Position.ROBOTS_TXT.value)
+        return True
+
+    # ---- position P10: cookie -----------------------------------------
+
+    def _apply_cookie(self, flow: http.HTTPFlow, entry: dict[str, Any]) -> bool:
+        text = get_injection(entry.get("objective"), entry.get("trigger"),
+                             entry.get("payload"))
+        if not text:
+            return False
+
+        cookie_name = entry.get("cookie_name", "hint")
+        safe_val = text.replace(";", "").replace("\n", " ").replace("\r", "")
+        flow.response.headers.add("Set-Cookie", f"{cookie_name}={safe_val}; Path=/")
+        self._log_injection(flow, entry, text, position=Position.COOKIE.value,
+                            cookie_name=cookie_name)
         return True
 
     # ---- helpers ------------------------------------------------------
