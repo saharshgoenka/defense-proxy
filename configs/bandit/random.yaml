@@ -1,0 +1,23 @@
+# Uniform-random arm selection (control condition). Same arm space and
+# solve-attribution logging as adaptive, but selection ignores posteriors.
+
+mode: random
+
+target:
+  host: localhost
+  http_port: 3000
+
+proxy:
+  http_port: 8080
+
+logging:
+  log_dir: ./logs
+
+defenses: []
+
+bandit:
+  priors_path: configs/bandit/priors.yaml
+  # Same solve-attribution horizon as adaptive (logging only for random).
+  window_requests: 5
+  window_seconds: 30.0
+  seed: 42

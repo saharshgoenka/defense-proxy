@@ -1,6 +1,6 @@
 # XBOW-final configuration — placeholder template.
 # Fill in once Juice Shop-specific analysis (Phase 5) identifies the most
-# disruptive 4-tuples for each category of agent reasoning failure.
+# disruptive 3-tuples for each category of agent reasoning failure.
 
 target:
   host: localhost
@@ -15,20 +15,17 @@ logging:
 
 defenses:
   - enabled: true
-    objective: GOAL_MANIPULATION   # TODO: fill after Juice Shop analysis
     position: http_body            # TODO: fill after Juice Shop analysis
     trigger: context_blend         # TODO: fill after Juice Shop analysis
     payload: fake_flag             # TODO: fill after Juice Shop analysis
     stealth: html_comment
 
   - enabled: true
-    objective: MISDIRECTION        # TODO: fill after Juice Shop analysis
     position: http_header          # TODO: fill after Juice Shop analysis
     trigger: system_alert          # TODO: fill after Juice Shop analysis
     payload: decoy_port            # TODO: fill after Juice Shop analysis
 
   - enabled: true
-    objective: TARPIT              # TODO: fill after Juice Shop analysis
     position: error_message        # TODO: fill after Juice Shop analysis
     trigger: authority             # TODO: fill after Juice Shop analysis
     payload: recursive_exploration # TODO: fill after Juice Shop analysis

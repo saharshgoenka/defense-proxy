@@ -3,10 +3,10 @@
 Research proxy for evaluating defensive prompt injection against LLM-based
 hacking agents (PentestGPT, CAI). Sits between the agent and a target
 system, intercepts server responses, and injects adversarial text payloads
-across an 8-position taxonomy:
+across a 3-dimensional taxonomy:
 
 ```
-Objective × Position × Trigger × Payload
+Position × Trigger × Payload
 ```
 
 DefenseProxy runs on the host, forwarding traffic from `localhost:8080` to
@@ -111,7 +111,6 @@ Each entry in `defenses`:
 | key | values | notes |
 |---|---|---|
 | `enabled`   | bool                                                                                                             | disabled entries are ignored |
-| `objective` | `MISDIRECTION`, `GOAL_MANIPULATION`, `TARPIT`, `COUNTERSTRIKE`, `EXFILTRATION`, `DEGRADATION`                     | metadata; not injected verbatim |
 | `position`  | `service_banner`, `login_response`, `http_header`, `http_body`, `file_content`, `error_message`, `dns_network`, `code_comment` | routes entry to the right module |
 | `trigger`   | `override`, `momentum`, `system_alert`, `reward_signal`, `authority`, `context_blend`                            | coercive prefix (empty for `context_blend`) |
 | `payload`   | `decoy_port`, `fake_vulnerability`, `fake_flag`, `task_complete`, `recursive_exploration`, `reverse_shell`, `prompt_leak`, `tool_confusion`, `resource_exhaustion` | concrete injected body |

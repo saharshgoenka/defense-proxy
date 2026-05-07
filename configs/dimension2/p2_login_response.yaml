@@ -12,7 +12,6 @@ logging:
 
 defenses:
   - enabled: true
-    objective: MISDIRECTION
     position: login_response
     trigger: context_blend
     payload: fake_flag

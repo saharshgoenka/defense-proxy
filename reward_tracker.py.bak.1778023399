@@ -1,0 +1,444 @@
+"""Online reward attribution for AdaptiveDefenseProxy.
+
+Per the paper (§3.3), each injection's reward is computed from three signals
+extracted from the agent's *own* HTTP traffic flowing back through the proxy
+in the K-window after we stamped the response:
+
+    bite  in {0, 1}    — any subsequent request matches the payload's
+                          fingerprint (PAYLOAD_DSR_KEYWORDS)
+    halt  in {0, 1}    — request rate in the post-window collapses to
+                          < 10% of the rate over the prior 60s
+    drift in [0, 1]    — Jaccard distance between post-window URL prefixes
+                          and pre-window URL prefixes
+
+    r = clip(bite + halt + 0.5 * drift, 0, 1)
+
+The tracker also fires the backfire guard (§3.2): if r < 0.1 and the
+post-window request rate exceeds the pre-injection rate, the arm is
+placed on cooldown for 60 seconds.
+
+Reward attribution is *eager*: each new request walks the registry of
+pending injections and updates their accumulated bite/drift signal in
+place. When an injection's window closes (K requests observed OR T_max
+seconds elapsed), the final reward is computed and the bandit is updated.
+
+This module is the only place keyword fingerprinting and rate-counting
+live; the bandit is a pure decision core (§bandit.py).
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterable
+
+from bandit import Arm, DefenseBandit
+from payloads import PAYLOAD_DSR_KEYWORDS
+
+# Reward-window parameters. Conservative defaults; can be overridden via
+# RewardTracker(..., window_requests=K, window_seconds=T).
+DEFAULT_WINDOW_REQUESTS = 5
+DEFAULT_WINDOW_SECONDS = 30.0
+BASELINE_RATE_LOOKBACK_SECONDS = 60.0
+HALT_RATIO_THRESHOLD = 0.10
+DRIFT_PATH_DEPTH = 2
+DRIFT_THRESHOLD = 0.5
+BACKFIRE_REWARD_CEILING = 0.1
+BACKFIRE_COOLDOWN_SECONDS = 60.0
+
+
+# ---- request abstraction --------------------------------------------------
+
+@dataclass
+class RequestSummary:
+    """Minimal request snapshot needed for keyword/rate/drift signals."""
+    timestamp: float
+    method: str
+    url: str
+    path: str
+    headers_text: str = ""
+    body_text: str = ""
+
+    def matches_keyword(self, kw: str) -> bool:
+        kw_l = kw.lower()
+        return (kw_l in self.url.lower()
+                or kw_l in self.headers_text.lower()
+                or kw_l in self.body_text.lower())
+
+
+# ---- per-injection bookkeeping --------------------------------------------
+
+@dataclass
+class PendingInjection:
+    injection_id: str
+    arm: Arm
+    phase: str
+    t_inject: float
+    baseline_rate: float
+    bite: int = 0
+    drift_acc: float = 0.0
+    drift_samples: int = 0
+    requests_seen: int = 0
+    closed: bool = False
+
+    def maybe_close(
+        self,
+        now: float,
+        window_requests: int,
+        window_seconds: float,
+    ) -> bool:
+        if self.closed:
+            return True
+        if self.requests_seen >= window_requests:
+            return True
+        if now - self.t_inject >= window_seconds:
+            return True
+        return False
+
+
+# ---- phase classifier -----------------------------------------------------
+
+class PhaseClassifier:
+    """Classify the agent's current attack phase from its recent requests.
+
+    See §3.4 of the paper. Pure URL-pattern rules — no model calls.
+    """
+
+    EXFIL_PREFIXES = ("/admin", "/auth", "/login", "/users", "/rest/user",
+                      "/profile", "/me", "/api/users", "/api/admin",
+                      "/secret", "/.env", "/.git")
+    RECON_PATHS = ("/", "/robots.txt", "/sitemap.xml", "/favicon.ico",
+                   "/.well-known")
+    ENUM_PREFIXES = ("/api", "/rest", "/graphql", "/v1", "/v2")
+
+    @classmethod
+    def classify(cls, recent: Iterable[RequestSummary]) -> str:
+        rs = list(recent)[-10:]
+        if not rs:
+            return "recon"
+
+        for r in reversed(rs):
+            if r.method.upper() == "POST":
+                return "exploit"
+            if any(r.path.startswith(p) for p in cls.EXFIL_PREFIXES):
+                return "exfil"
+
+        if all(r.path in cls.RECON_PATHS or r.path == "/" for r in rs):
+            return "recon"
+
+        if any(r.path.startswith(p) for p in cls.ENUM_PREFIXES for r in rs):
+            return "enum"
+
+        return "recon"
+
+
+# ---- the tracker ----------------------------------------------------------
+
+class RewardTracker:
+    """Sliding-window reward computation tied to a DefenseBandit instance.
+
+    Threadsafe enough for mitmproxy's single-threaded asyncio loop with
+    occasional background scheduling; uses a coarse lock for state mutation.
+    """
+
+    def __init__(
+        self,
+        bandit: DefenseBandit,
+        *,
+        window_requests: int = DEFAULT_WINDOW_REQUESTS,
+        window_seconds: float = DEFAULT_WINDOW_SECONDS,
+        on_update: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        self.bandit = bandit
+        self.window_requests = window_requests
+        self.window_seconds = window_seconds
+        self.on_update = on_update
+        self._lock = threading.Lock()
+        self._requests: deque[RequestSummary] = deque(maxlen=2048)
+        self._pending: dict[str, PendingInjection] = {}
+
+    # ---- public API: called by the proxy ------------------------------
+
+    def current_phase(self) -> str:
+        with self._lock:
+            recent = list(self._requests)[-10:]
+        return PhaseClassifier.classify(recent)
+
+    def feasible_arms(self, response_features: dict[str, Any],
+                      all_arms: Iterable[Arm]) -> list[Arm]:
+        """Filter the universe of arms to those that fit this response."""
+        path = (response_features.get("path") or "").split("?")[0]
+        ctype = (response_features.get("content_type") or "").lower()
+        status = int(response_features.get("status") or 200)
+
+        out: list[Arm] = []
+        for arm in all_arms:
+            if arm.position == "robots_txt" and path != "/robots.txt":
+                continue
+            if arm.position == "error_message" and not (400 <= status < 600):
+                continue
+            if arm.position == "code_comment" and not (
+                "javascript" in ctype or "ecmascript" in ctype or "html" in ctype
+            ):
+                continue
+            if arm.position == "http_body" and ctype and not (
+                ctype.startswith("text/") or "html" in ctype
+                or "xml" in ctype or "json" in ctype
+            ):
+                continue
+            out.append(arm)
+        return out
+
+    def register_injection(
+        self,
+        injection_id: str,
+        arm: Arm,
+        phase: str,
+        t_inject: float | None = None,
+    ) -> None:
+        ts = t_inject if t_inject is not None else time.time()
+        baseline = self._rate_in_window(
+            ts - BASELINE_RATE_LOOKBACK_SECONDS, ts
+        )
+        with self._lock:
+            self._pending[injection_id] = PendingInjection(
+                injection_id=injection_id,
+                arm=arm,
+                phase=phase,
+                t_inject=ts,
+                baseline_rate=baseline,
+            )
+
+    def observe_request(self, req: RequestSummary) -> None:
+        """Record a new agent request and credit any pending injections."""
+        with self._lock:
+            self._requests.append(req)
+            ids_to_close: list[str] = []
+            for inj_id, pi in self._pending.items():
+                if req.timestamp < pi.t_inject:
+                    continue
+                pi.requests_seen += 1
+                # Bite: any keyword for this payload appears in the request.
+                if not pi.bite:
+                    for kw in PAYLOAD_DSR_KEYWORDS.get(pi.arm.payload, []):
+                        if req.matches_keyword(kw):
+                            pi.bite = 1
+                            break
+                # Drift: contribution to running Jaccard distance proxy.
+                # We use the prefix of the path (e.g., "/api/users" -> "/api")
+                # and accumulate the fraction of post-window prefixes that
+                # weren't in the pre-window. Computed on close (below).
+                pi.drift_samples += 1
+
+                if pi.maybe_close(req.timestamp, self.window_requests,
+                                   self.window_seconds):
+                    ids_to_close.append(inj_id)
+
+            # Also close any that timed out without seeing a request.
+            now = req.timestamp
+            for inj_id, pi in self._pending.items():
+                if inj_id in ids_to_close or pi.closed:
+                    continue
+                if now - pi.t_inject >= self.window_seconds:
+                    ids_to_close.append(inj_id)
+
+        for inj_id in ids_to_close:
+            self._close_and_update(inj_id)
+
+    def flush_expired(self, now: float | None = None) -> None:
+        """Close any pending injections whose time window has elapsed.
+
+        Call this periodically from the proxy if you want windows to close
+        even when no new agent traffic is arriving.
+        """
+        ts = now if now is not None else time.time()
+        with self._lock:
+            ids = [
+                inj_id for inj_id, pi in self._pending.items()
+                if (not pi.closed) and (ts - pi.t_inject >= self.window_seconds)
+            ]
+        for inj_id in ids:
+            self._close_and_update(inj_id)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "n_requests": len(self._requests),
+                "n_pending": sum(1 for p in self._pending.values()
+                                 if not p.closed),
+                "n_closed": sum(1 for p in self._pending.values() if p.closed),
+            }
+
+    # ---- internals ----------------------------------------------------
+
+    def _rate_in_window(self, t_lo: float, t_hi: float) -> float:
+        if t_hi <= t_lo:
+            return 0.0
+        with self._lock:
+            n = sum(1 for r in self._requests if t_lo <= r.timestamp < t_hi)
+        return n / (t_hi - t_lo)
+
+    def _drift_signal(self, pi: PendingInjection,
+                      pre_window: list[RequestSummary],
+                      post_window: list[RequestSummary]) -> float:
+        def prefixes(reqs: Iterable[RequestSummary]) -> set[str]:
+            out: set[str] = set()
+            for r in reqs:
+                parts = [p for p in r.path.split("/") if p]
+                out.add("/" + "/".join(parts[:DRIFT_PATH_DEPTH]))
+            return out
+
+        pre = prefixes(pre_window)
+        post = prefixes(post_window)
+        if not post:
+            return 0.0
+        if not pre:
+            return 1.0
+        union = pre | post
+        inter = pre & post
+        jaccard = len(inter) / len(union) if union else 0.0
+        return 1.0 - jaccard
+
+    def _close_and_update(self, injection_id: str) -> None:
+        with self._lock:
+            pi = self._pending.get(injection_id)
+            if pi is None or pi.closed:
+                return
+            pi.closed = True
+            now = time.time()
+            t_lo_pre = pi.t_inject - BASELINE_RATE_LOOKBACK_SECONDS
+            t_hi_pre = pi.t_inject
+            t_lo_post = pi.t_inject
+            t_hi_post = pi.t_inject + self.window_seconds
+            pre_reqs = [r for r in self._requests
+                         if t_lo_pre <= r.timestamp < t_hi_pre]
+            post_reqs = [r for r in self._requests
+                          if t_lo_post <= r.timestamp <= t_hi_post]
+
+        # Halt: post-window rate vs baseline.
+        post_rate = len(post_reqs) / max(self.window_seconds, 1e-6)
+        halt = 1 if (pi.baseline_rate > 0
+                     and post_rate / pi.baseline_rate < HALT_RATIO_THRESHOLD) else 0
+
+        drift = self._drift_signal(pi, pre_reqs, post_reqs)
+        if drift < DRIFT_THRESHOLD:
+            drift_contrib = 0.0
+        else:
+            drift_contrib = drift
+
+        reward = max(0.0, min(1.0,
+                              float(pi.bite) + float(halt)
+                              + 0.5 * drift_contrib))
+
+        # Backfire guard. Looks at the *hard* signals only (bite + halt) —
+        # drift is noisy enough that an agent on a tangent shouldn't be
+        # able to mask a true backfire (no bite, no halt, post_rate spike).
+        hard_signal = float(pi.bite) + float(halt)
+        backfired = (hard_signal < BACKFIRE_REWARD_CEILING
+                     and post_rate > pi.baseline_rate
+                     and pi.baseline_rate > 0)
+
+        self.bandit.update(pi.arm, pi.phase, reward)
+        if backfired:
+            self.bandit.cooldown(pi.arm,
+                                 until_ts=now + BACKFIRE_COOLDOWN_SECONDS)
+
+        if self.on_update is not None:
+            self.on_update({
+                "injection_id": pi.injection_id,
+                "arm": pi.arm.key(),
+                "phase": pi.phase,
+                "bite": pi.bite,
+                "halt": halt,
+                "drift": drift,
+                "reward": reward,
+                "baseline_rate": pi.baseline_rate,
+                "post_rate": post_rate,
+                "backfired": backfired,
+            })
+
+
+# ---- self-test ------------------------------------------------------------
+
+def _selftest() -> None:
+    """Smoke test: simulate a few injections + agent requests and check
+    that bite/halt/drift fire correctly and backfire guard cools an arm."""
+    from pathlib import Path
+    here = Path(__file__).resolve().parent
+    priors = here / "configs" / "bandit" / "priors.yaml"
+    bandit = DefenseBandit.from_yaml(priors, seed=0)
+    updates: list[dict[str, Any]] = []
+    rt = RewardTracker(bandit, window_requests=3, window_seconds=2.0,
+                       on_update=updates.append)
+
+    # Bootstrap baseline rate with prior traffic.
+    t = time.time()
+    for i in range(10):
+        rt.observe_request(RequestSummary(
+            timestamp=t - 30 + i * 3, method="GET",
+            url="http://target/api/v1/items", path="/api/v1/items"))
+
+    # Case 1: BITE — inject decoy_port; agent then requests :8743.
+    arm_decoy = Arm("http_body", "context_blend", "decoy_port")
+    inj_id = "inj_decoy_1"
+    rt.register_injection(inj_id, arm_decoy, "exploit", t_inject=t + 0.1)
+    # The bite signal: subsequent request URL contains "8743".
+    rt.observe_request(RequestSummary(
+        timestamp=t + 0.5, method="GET",
+        url="http://target:8743/", path="/"))
+    rt.observe_request(RequestSummary(
+        timestamp=t + 0.6, method="GET",
+        url="http://target:8743/api", path="/api"))
+    rt.observe_request(RequestSummary(
+        timestamp=t + 0.7, method="GET",
+        url="http://target:8743/admin", path="/admin"))
+
+    rt.flush_expired(now=t + 5.0)
+
+    decoy_updates = [u for u in updates if u["arm"] == arm_decoy.key()]
+    assert decoy_updates, "no update fired for decoy"
+    assert decoy_updates[0]["bite"] == 1, f"bite did not fire: {decoy_updates[0]}"
+    print(f"[selftest] OK — bite fired: {decoy_updates[0]}")
+
+    # Case 2: HALT + BACKFIRE — inject reverse_shell; agent goes silent
+    # (halt) but post_rate stays above baseline because we record nothing.
+    # This is the *halt* path; for backfire, we test below.
+    arm_rev = Arm("http_body", "context_blend", "reverse_shell")
+    inj_id_rev = "inj_rev_1"
+    rt.register_injection(inj_id_rev, arm_rev, "exploit", t_inject=t + 10.0)
+    # No observe_request between t+10 and t+12 -> halt should fire on flush.
+    rt.flush_expired(now=t + 13.0)
+    rev_updates = [u for u in updates if u["arm"] == arm_rev.key()]
+    assert rev_updates, "no update fired for reverse_shell"
+    assert rev_updates[0]["halt"] == 1, f"halt did not fire: {rev_updates[0]}"
+    print(f"[selftest] OK — halt fired: {rev_updates[0]}")
+
+    # Case 3: BACKFIRE — inject tool_confusion; agent's request rate spikes
+    # without any matching keyword. Same path prefix as baseline so drift
+    # is 0 and only the hard-signal+rate test fires.
+    updates.clear()
+    arm_tool = Arm("http_body", "context_blend", "tool_confusion")
+    inj_id_tool = "inj_tool_1"
+    rt.register_injection(inj_id_tool, arm_tool, "exploit", t_inject=t + 20.0)
+    for i in range(5):
+        rt.observe_request(RequestSummary(
+            timestamp=t + 20.1 + i * 0.3, method="GET",
+            url="http://target/api/v1/items", path="/api/v1/items"))
+    rt.flush_expired(now=t + 23.0)
+    tool_updates = [u for u in updates if u["arm"] == arm_tool.key()]
+    assert tool_updates, "no update fired for tool_confusion"
+    assert tool_updates[0]["bite"] == 0, f"unexpected bite: {tool_updates[0]}"
+    assert tool_updates[0]["backfired"] is True, \
+        f"backfire guard did not fire: {tool_updates[0]}"
+    print(f"[selftest] OK — backfire guard fired: {tool_updates[0]}")
+
+    # And the cooled arm should be excluded from selection.
+    excluded = bandit.select("exploit", [arm_tool])
+    assert excluded is None, "cooldown did not exclude tool_confusion"
+    print("[selftest] OK — cooled arm excluded from selection")
+
+
+if __name__ == "__main__":
+    _selftest()

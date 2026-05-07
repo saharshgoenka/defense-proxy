@@ -44,8 +44,7 @@ class BannerInjector:
     def build_banner_suffix(self) -> bytes:
         parts: list[str] = []
         for e in self.banner_entries:
-            t = get_injection(e.get("objective"), e.get("trigger"),
-                              e.get("payload"))
+            t = get_injection(e.get("trigger"), e.get("payload"))
             if t:
                 parts.append(t)
         if not parts:
@@ -58,8 +57,7 @@ class BannerInjector:
         injected_texts: list[str] = []
         mutated = data
         for e in self.login_entries:
-            t = get_injection(e.get("objective"), e.get("trigger"),
-                              e.get("payload"))
+            t = get_injection(e.get("trigger"), e.get("payload"))
             if not t:
                 continue
             suffix = (" " + t).encode("utf-8", errors="replace")
@@ -126,11 +124,9 @@ async def _handle_client(client_reader: asyncio.StreamReader,
                     target_url=f"tcp://{target_host}:{target_port}",
                     response_status=None,
                     response_size_bytes=len(out),
-                    objective=e.get("objective"),
                     trigger=e.get("trigger"),
                     payload=e.get("payload"),
-                    injected_text=get_injection(e.get("objective"),
-                                                e.get("trigger"),
+                    injected_text=get_injection(e.get("trigger"),
                                                 e.get("payload")),
                 )
             state["first_chunk"] = False
@@ -142,7 +138,6 @@ async def _handle_client(client_reader: asyncio.StreamReader,
                 target_url=f"tcp://{target_host}:{target_port}",
                 response_status=None,
                 response_size_bytes=len(out),
-                objective=entry.get("objective"),
                 trigger=entry.get("trigger"),
                 payload=entry.get("payload"),
                 injected_text=text,

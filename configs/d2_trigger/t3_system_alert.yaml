@@ -11,7 +11,6 @@ logging:
 
 defenses:
   - enabled: true
-    objective: MISDIRECTION
     position: http_body
     trigger: system_alert
     payload: fake_flag

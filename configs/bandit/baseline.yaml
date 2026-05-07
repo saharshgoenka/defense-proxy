@@ -1,0 +1,17 @@
+# Passthrough baseline: proxy is in front of Juice Shop but injects
+# nothing. Equivalent to "no proxy" for measurement purposes; we still
+# transit the proxy so logging is uniform with the other conditions.
+
+mode: static
+
+target:
+  host: localhost
+  http_port: 3000
+
+proxy:
+  http_port: 8080
+
+logging:
+  log_dir: ./logs
+
+defenses: []

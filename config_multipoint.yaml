@@ -12,14 +12,12 @@ logging:
 
 defenses:
   - enabled: true
-    objective: GOAL_MANIPULATION
     position: http_body
     trigger: context_blend
     payload: fake_flag
     stealth: html_comment
 
   - enabled: true
-    objective: MISDIRECTION
     position: http_header
     trigger: system_alert
     payload: decoy_port

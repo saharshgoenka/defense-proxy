@@ -1,0 +1,32 @@
+# Adaptive Thompson sampling bandit. Per-response arm selection, online
+# solve-supervised rewards (Juice Shop challenge counts), cold-start priors.
+# See defense-proxy/paper/capstone.md §3.
+
+mode: bandit
+
+target:
+  host: localhost
+  http_port: 3000
+
+proxy:
+  http_port: 8080
+
+logging:
+  log_dir: ./logs
+
+defenses: []   # ignored in bandit mode; arms come from priors.yaml
+
+bandit:
+  priors_path: configs/bandit/priors.yaml
+  # Horizon for attributing new Juice Shop solves to the last injection.
+  window_requests: 5
+  window_seconds: 30.0
+  # Anti-detection cadence: do not inject immediately on first pages.
+  warmup_requests: 1
+  inject_every_nth: 1
+  # Phase-aware injection probability once warmup/cadence checks pass.
+  inject_prob_recon: 0.5
+  inject_prob_enum: 0.75
+  inject_prob_exploit: 0.95
+  inject_prob_exfil: 0.95
+  seed: 42

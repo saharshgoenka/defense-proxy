@@ -1,10 +1,15 @@
+# Static "fixed-best" defense: always inject the marginal-best arm
+# (fake_flag in HTTP body, context_blend trigger) on every applicable
+# response. The strongest static baseline from prior ablation.
+
+mode: static
+
 target:
   host: localhost
   http_port: 3000
 
 proxy:
   http_port: 8080
-  tcp_port: 2121
 
 logging:
   log_dir: ./logs

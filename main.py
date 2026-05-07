@@ -29,7 +29,6 @@ import yaml
 
 from payloads import (
     PAYLOADS,
-    Objective,
     Position,
     TRIGGERS,
     list_payloads_table,
@@ -83,12 +82,14 @@ def stop_juice_shop(container_id: str) -> None:
 
 # ---------- config validation -------------------------------------------
 
-VALID_OBJECTIVES = {o.value for o in Objective}
 VALID_POSITIONS = {p.value for p in Position}
 VALID_TRIGGERS = set(TRIGGERS.keys())
 VALID_PAYLOADS = set(PAYLOADS.keys())
 VALID_STEALTH = {"inline", "html_comment", "meta_tag"}
 VALID_ERROR_MODES = {"body", "json_field"}
+
+
+VALID_MODES = {"static", "bandit", "random"}
 
 
 def validate_config(cfg: dict[str, Any]) -> list[str]:
@@ -107,9 +108,19 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     if not log_dir:
         errors.append("logging.log_dir missing")
 
+    mode = (cfg.get("mode") or "static").lower()
+    if mode not in VALID_MODES:
+        errors.append(f"mode={mode!r} not in {sorted(VALID_MODES)}")
+
+    bandit_cfg = cfg.get("bandit")
+    if bandit_cfg is not None and not isinstance(bandit_cfg, dict):
+        errors.append("bandit must be a mapping if present")
+
     defenses = cfg.get("defenses")
-    if defenses is None:
+    if defenses is None and mode == "static":
         errors.append("defenses key missing (use `defenses: []` for passthrough)")
+    elif defenses is None:
+        defenses = []
     else:
         seen: set[tuple[str, str]] = set()
         for i, d in enumerate(defenses or []):
@@ -119,9 +130,6 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
                 continue
             if "enabled" not in d:
                 errors.append(f"{prefix}.enabled missing")
-            obj = d.get("objective")
-            if obj and obj not in VALID_OBJECTIVES:
-                errors.append(f"{prefix}.objective={obj!r} not in {sorted(VALID_OBJECTIVES)}")
             pos = d.get("position")
             if not pos:
                 errors.append(f"{prefix}.position missing")
@@ -142,7 +150,7 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
                 if mode not in VALID_ERROR_MODES:
                     errors.append(f"{prefix}.mode={mode!r} not in {sorted(VALID_ERROR_MODES)}")
             # Duplicate (position, payload) detection — warning only.
-            key = (pos or "", payload or obj or "")
+            key = (pos or "", payload or "")
             if d.get("enabled") and key in seen:
                 errors.append(f"{prefix} duplicate (position, payload) = {key}")
             else:

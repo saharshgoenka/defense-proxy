@@ -42,7 +42,6 @@ class RunLogger:
             "response_status": fields.pop("response_status", None),
             "response_size_bytes": fields.pop("response_size_bytes", None),
             # Taxonomy dimensions (nullable until set by the proxy layer).
-            "objective": fields.pop("objective", None),
             "trigger": fields.pop("trigger", None),
             "payload": fields.pop("payload", None),
         }
@@ -70,7 +69,7 @@ class RunLogger:
     def log_injection(self, *, position: str, target_url: str,
                       response_status: int | None,
                       response_size_bytes: int | None,
-                      objective: str | None, trigger: str | None,
+                      trigger: str | None,
                       payload: str | None, injected_text: str,
                       **extra: Any) -> None:
         self.log(
@@ -79,7 +78,6 @@ class RunLogger:
             target_url=target_url,
             response_status=response_status,
             response_size_bytes=response_size_bytes,
-            objective=objective,
             trigger=trigger,
             payload=payload,
             injected_text=injected_text,
