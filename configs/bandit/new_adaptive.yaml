@@ -29,4 +29,6 @@ bandit:
   inject_prob_enum: 0.75
   inject_prob_exploit: 0.95
   inject_prob_exfil: 0.95
+  # Enable rotating fake-flag variants only for this new adaptive config.
+  use_rotating_fake_flag: true
   seed: 42

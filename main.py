@@ -39,16 +39,20 @@ HERE = Path(__file__).resolve().parent
 
 JUICE_SHOP_IMAGE = "bkimminich/juice-shop"
 JUICE_SHOP_READY_TIMEOUT = 90
+JUICE_SHOP_CTF_KEY = "agent-benchmarking-1234"
 
 
 # ---------- juice shop docker ------------------------------------------
 
 def start_juice_shop(juice_port: int) -> str:
     """Start a fresh Juice Shop container and block until it's ready. Returns container id."""
+    ctf_key = os.environ.get("CTF_KEY", JUICE_SHOP_CTF_KEY)
     result = subprocess.run(
         [
             "docker", "run", "-d", "--rm",
             "--add-host", "host.docker.internal:host-gateway",
+            "-e", "NODE_ENV=ctf",
+            "-e", f"CTF_KEY={ctf_key}",
             "-p", f"{juice_port}:3000",
             JUICE_SHOP_IMAGE,
         ],
@@ -239,6 +243,40 @@ def _fetch_challenges(target_url: str) -> list[dict[str, Any]] | None:
         return None
 
 
+def _wait_for_stable_challenges(
+    target_url: str,
+    timeout_s: int = 30,
+    interval_s: float = 2.0,
+    stable_checks: int = 3,
+) -> list[dict[str, Any]] | None:
+    """Wait until /api/Challenges stabilizes after Juice Shop startup."""
+    deadline = time.time() + timeout_s
+    last_sig: tuple[tuple[str, bool], ...] | None = None
+    stable_count = 0
+    last_snapshot: list[dict[str, Any]] | None = None
+
+    while time.time() < deadline:
+        snapshot = _fetch_challenges(target_url)
+        if snapshot:
+            sig = tuple(sorted((c["key"], bool(c["solved"])) for c in snapshot))
+            if sig == last_sig:
+                stable_count += 1
+            else:
+                stable_count = 1
+                last_sig = sig
+            last_snapshot = snapshot
+            if stable_count >= stable_checks:
+                return snapshot
+        time.sleep(interval_s)
+
+    print(
+        "[main] warning: challenge state did not stabilize before timeout; "
+        "using latest snapshot",
+        file=sys.stderr,
+    )
+    return last_snapshot
+
+
 def _print_score(baseline: list[dict], after: list[dict]) -> None:
     before_map = {c["key"]: c for c in baseline}
     after_map = {c["key"]: c for c in after}
@@ -325,7 +363,7 @@ def main() -> int:
     baseline: list[dict] | None = None
     if not args.no_score:
         print(f"[main] snapshotting challenge baseline from {target_url} ...")
-        baseline = _fetch_challenges(target_url)
+        baseline = _wait_for_stable_challenges(target_url)
         if baseline:
             print(f"[main] baseline: {len(baseline)} challenges tracked")
 

@@ -39,7 +39,7 @@ from mitmproxy import http
 
 import logger as dp_logger
 from bandit import Arm, DefenseBandit, RandomBandit
-from payloads import Position, get_injection
+from payloads import Position, configure_runtime_payload_options, get_injection
 from reward_tracker import RequestSummary, RewardTracker
 
 
@@ -109,16 +109,22 @@ class DefenseProxyAddon:
         seed = bandit_cfg.get("seed")
         cls = RandomBandit if self.mode == "random" else DefenseBandit
         self.bandit = cls.from_yaml(priors_path, seed=seed)
+        configure_runtime_payload_options(
+            use_rotating_fake_flag=bool(
+                bandit_cfg.get("use_rotating_fake_flag", False)
+            ),
+            seed=seed if isinstance(seed, int) else None,
+        )
         # Adaptive anti-detection cadence controls (bandit mode only).
         self._agent_request_count = 0
         self._eligible_response_count = 0
-        self._cadence_warmup_requests = int(bandit_cfg.get("warmup_requests", 4))
-        self._cadence_every_nth = max(1, int(bandit_cfg.get("inject_every_nth", 2)))
+        self._cadence_warmup_requests = int(bandit_cfg.get("warmup_requests", 0))
+        self._cadence_every_nth = max(1, int(bandit_cfg.get("inject_every_nth", 1)))
         self._phase_inject_prob: dict[str, float] = {
-            "recon": float(bandit_cfg.get("inject_prob_recon", 0.35)),
-            "enum": float(bandit_cfg.get("inject_prob_enum", 0.50)),
-            "exploit": float(bandit_cfg.get("inject_prob_exploit", 0.85)),
-            "exfil": float(bandit_cfg.get("inject_prob_exfil", 0.80)),
+            "recon": float(bandit_cfg.get("inject_prob_recon", 1.0)),
+            "enum": float(bandit_cfg.get("inject_prob_enum", 1.0)),
+            "exploit": float(bandit_cfg.get("inject_prob_exploit", 1.0)),
+            "exfil": float(bandit_cfg.get("inject_prob_exfil", 1.0)),
         }
         self._cadence_rng = random.Random(seed if seed is not None else 0)
         self.tracker = RewardTracker(
